@@ -7,6 +7,7 @@
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <boost/optional.hpp>
+#include <sensor_msgs/LaserScan.h>
 
 namespace g2o {
 class VertexSE3;
@@ -25,7 +26,7 @@ public:
   using PointT = pcl::PointXYZI;
   using Ptr = std::shared_ptr<KeyFrame>;
 
-  KeyFrame(const ros::Time& stamp, const Eigen::Isometry3d& odom, double accum_distance, const pcl::PointCloud<PointT>::ConstPtr& cloud);
+  KeyFrame(const ros::Time& stamp, const Eigen::Isometry3d& odom, double accum_distance, const pcl::PointCloud<PointT>::ConstPtr& cloud, const sensor_msgs::LaserScanConstPtr& scan);
   KeyFrame(const std::string& directory, g2o::HyperGraph* graph);
   virtual ~KeyFrame();
 
@@ -42,6 +43,8 @@ public:
   pcl::PointCloud<PointT>::ConstPtr cloud;        // point cloud
   boost::optional<Eigen::Vector4d> floor_coeffs;  // detected floor's coefficients
   boost::optional<Eigen::Vector3d> utm_coord;     // UTM coord obtained by GPS
+
+  sensor_msgs::LaserScanConstPtr scan;            // laser scan message
 
   boost::optional<Eigen::Vector3d> acceleration;    //
   boost::optional<Eigen::Quaterniond> orientation;  //
@@ -60,13 +63,14 @@ public:
   using Ptr = std::shared_ptr<KeyFrameSnapshot>;
 
   KeyFrameSnapshot(const KeyFrame::Ptr& key);
-  KeyFrameSnapshot(const Eigen::Isometry3d& pose, const pcl::PointCloud<PointT>::ConstPtr& cloud);
+  KeyFrameSnapshot(const Eigen::Isometry3d& pose, const pcl::PointCloud<PointT>::ConstPtr& cloud, const sensor_msgs::LaserScanConstPtr & scan);
 
   ~KeyFrameSnapshot();
 
 public:
   Eigen::Isometry3d pose;                   // pose estimated by graph optimization
   pcl::PointCloud<PointT>::ConstPtr cloud;  // point cloud
+  sensor_msgs::LaserScanConstPtr scan;      // laser scan message
 };
 
 }  // namespace hdl_graph_slam

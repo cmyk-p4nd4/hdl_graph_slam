@@ -10,7 +10,7 @@
 
 namespace hdl_graph_slam {
 
-KeyFrame::KeyFrame(const ros::Time& stamp, const Eigen::Isometry3d& odom, double accum_distance, const pcl::PointCloud<PointT>::ConstPtr& cloud) : stamp(stamp), odom(odom), accum_distance(accum_distance), cloud(cloud), node(nullptr) {}
+KeyFrame::KeyFrame(const ros::Time& stamp, const Eigen::Isometry3d& odom, double accum_distance, const pcl::PointCloud<PointT>::ConstPtr& cloud, const sensor_msgs::LaserScanConstPtr& scan) : stamp(stamp), odom(odom), accum_distance(accum_distance), cloud(cloud), scan(scan), node(nullptr) {}
 
 KeyFrame::KeyFrame(const std::string& directory, g2o::HyperGraph* graph) : stamp(), odom(Eigen::Isometry3d::Identity()), accum_distance(-1), cloud(nullptr), node(nullptr) {
   load(directory, graph);
@@ -152,9 +152,9 @@ Eigen::Isometry3d KeyFrame::estimate() const {
   return node->estimate();
 }
 
-KeyFrameSnapshot::KeyFrameSnapshot(const Eigen::Isometry3d& pose, const pcl::PointCloud<PointT>::ConstPtr& cloud) : pose(pose), cloud(cloud) {}
+KeyFrameSnapshot::KeyFrameSnapshot(const Eigen::Isometry3d& pose, const pcl::PointCloud<PointT>::ConstPtr& cloud, const sensor_msgs::LaserScanConstPtr & scan) : pose(pose), cloud(cloud), scan(scan) {}
 
-KeyFrameSnapshot::KeyFrameSnapshot(const KeyFrame::Ptr& key) : pose(key->node->estimate()), cloud(key->cloud) {}
+KeyFrameSnapshot::KeyFrameSnapshot(const KeyFrame::Ptr& key) : pose(key->node->estimate()), cloud(key->cloud), scan(key->scan) {}
 
 KeyFrameSnapshot::~KeyFrameSnapshot() {}
 

@@ -25,6 +25,8 @@
 #include <g2o/edge_plane_parallel.hpp>
 #include <g2o/robust_kernel_io.hpp>
 
+#include <sstream>
+
 G2O_USE_OPTIMIZATION_LIBRARY(pcg)
 G2O_USE_OPTIMIZATION_LIBRARY(cholmod)  // be aware of that cholmod brings GPL dependency
 G2O_USE_OPTIMIZATION_LIBRARY(csparse)  // be aware of that csparse brings LGPL unless it is dynamically linked
@@ -295,27 +297,30 @@ int GraphSLAM::optimize(int num_iterations) {
     return -1;
   }
 
-  std::cout << std::endl;
-  std::cout << "--- pose graph optimization ---" << std::endl;
-  std::cout << "nodes: " << graph->vertices().size() << "   edges: " << graph->edges().size() << std::endl;
-  std::cout << "optimizing... " << std::flush;
+  std::stringstream ss;
 
-  std::cout << "init" << std::endl;
+  ss << std::endl;
+  ss << "--- pose graph optimization ---" << "\r\n";
+  ss << "nodes: " << graph->vertices().size() << "   edges: " << graph->edges().size() << "\r\n";
+  ss << "optimizing... ";
+  std::cout << ss.rdbuf() << std::flush;
+
+  ss.str("");
+
   graph->initializeOptimization();
-  graph->setVerbose(true);
+  graph->setVerbose(false);
 
-  std::cout << "chi2" << std::endl;
   double chi2 = graph->chi2();
 
-  std::cout << "optimize!!" << std::endl;
   auto t1 = ros::WallTime::now();
   int iterations = graph->optimize(num_iterations);
 
   auto t2 = ros::WallTime::now();
-  std::cout << "done" << std::endl;
-  std::cout << "iterations: " << iterations << " / " << num_iterations << std::endl;
-  std::cout << "chi2: (before)" << chi2 << " -> (after)" << graph->chi2() << std::endl;
-  std::cout << "time: " << boost::format("%.3f") % (t2 - t1).toSec() << "[sec]" << std::endl;
+  ss << "done" << std::endl;
+  ss << "iterations: " << iterations << "/" << num_iterations <<  " | ";
+  ss << "chi2: (before)" << chi2 << " -> (after)" << graph->chi2() << "\r\n";
+  ss << "time: " << boost::format("%.3f") % (t2 - t1).toSec() << "[sec]" << "\r\n";
+  std::cout << ss.rdbuf();
 
   return iterations;
 }

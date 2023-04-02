@@ -50,6 +50,7 @@
 #include <hdl_graph_slam/information_matrix_calculator.hpp>
 #include <hdl_graph_slam/map_cloud_generator.hpp>
 #include <hdl_graph_slam/nmea_sentence_parser.hpp>
+#include <hdl_graph_slam/map_grid_generator.hpp>
 
 #include <g2o/types/slam3d/edge_se3.h>
 #include <g2o/types/slam3d/vertex_se3.h>
@@ -64,7 +65,7 @@ namespace hdl_graph_slam {
 class HdlGraphSlamNodelet : public nodelet::Nodelet {
 public:
   typedef pcl::PointXYZI PointT;
-  typedef message_filters::sync_policies::ApproximateTime<nav_msgs::Odometry, sensor_msgs::PointCloud2> ApproxSyncPolicy;
+  typedef message_filters::sync_policies::ApproximateTime<nav_msgs::Odometry, sensor_msgs::PointCloud2, sensor_msgs::LaserScan> ApproxSyncPolicy;
 
   HdlGraphSlamNodelet() {}
   virtual ~HdlGraphSlamNodelet() {}
@@ -90,6 +91,7 @@ public:
     keyframe_updater.reset(new KeyframeUpdater(private_nh));
     loop_detector.reset(new LoopDetector(private_nh));
     map_cloud_generator.reset(new MapCloudGenerator());
+    map_grid_generator.reset(new MapGridGenerator());
     inf_calclator.reset(new InformationMatrixCalculator(private_nh));
     nmea_parser.reset(new NmeaSentenceParser());
 
@@ -109,8 +111,9 @@ public:
     // subscribers
     odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, "/odom", 256));
     cloud_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(mt_nh, "/filtered_points", 32));
-    sync.reset(new message_filters::Synchronizer<ApproxSyncPolicy>(ApproxSyncPolicy(32), *odom_sub, *cloud_sub));
-    sync->registerCallback(boost::bind(&HdlGraphSlamNodelet::cloud_callback, this, _1, _2));
+    scan_sub.reset(new message_filters::Subscriber<sensor_msgs::LaserScan>(mt_nh, "/scan", 32));
+    sync.reset(new message_filters::Synchronizer<ApproxSyncPolicy>(ApproxSyncPolicy(32), *odom_sub, *cloud_sub, *scan_sub));
+    sync->registerCallback(boost::bind(&HdlGraphSlamNodelet::cloud_callback, this, _1, _2, _3));
     imu_sub = nh.subscribe("/gpsimu_driver/imu_data", 1024, &HdlGraphSlamNodelet::imu_callback, this);
     floor_sub = nh.subscribe("/floor_detection/floor_coeffs", 1024, &HdlGraphSlamNodelet::floor_coeffs_callback, this);
 
@@ -125,6 +128,7 @@ public:
     odom2map_pub = mt_nh.advertise<geometry_msgs::TransformStamped>("/hdl_graph_slam/odom2pub", 16);
     map_points_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/hdl_graph_slam/map_points", 1, true);
     read_until_pub = mt_nh.advertise<std_msgs::Header>("/hdl_graph_slam/read_until", 32);
+    occ_grid_pub = mt_nh.advertise<nav_msgs::OccupancyGrid>("/hdl_graph_slam/projected_map", 10, true);
 
     dump_service_server = mt_nh.advertiseService("/hdl_graph_slam/dump", &HdlGraphSlamNodelet::dump_service, this);
     save_map_service_server = mt_nh.advertiseService("/hdl_graph_slam/save_map", &HdlGraphSlamNodelet::save_map_service, this);
@@ -142,7 +146,7 @@ private:
    * @param odom_msg
    * @param cloud_msg
    */
-  void cloud_callback(const nav_msgs::OdometryConstPtr& odom_msg, const sensor_msgs::PointCloud2::ConstPtr& cloud_msg) {
+  void cloud_callback(const nav_msgs::OdometryConstPtr& odom_msg, const sensor_msgs::PointCloud2::ConstPtr& cloud_msg, const sensor_msgs::LaserScan::ConstPtr& scan_msg) {
     const ros::Time& stamp = cloud_msg->header.stamp;
     Eigen::Isometry3d odom = odom2isometry(odom_msg);
 
@@ -167,7 +171,7 @@ private:
     }
 
     double accum_d = keyframe_updater->get_accum_distance();
-    KeyFrame::Ptr keyframe(new KeyFrame(stamp, odom, accum_d, cloud));
+    KeyFrame::Ptr keyframe(new KeyFrame(stamp, odom, accum_d, cloud, scan_msg));
 
     std::lock_guard<std::mutex> lock(keyframe_queue_mutex);
     keyframe_queue.push_back(keyframe);
@@ -531,6 +535,16 @@ private:
     pcl::toROSMsg(*cloud, *cloud_msg);
 
     map_points_pub.publish(cloud_msg);
+
+    nav_msgs::OccupancyGridPtr grid = map_grid_generator->generate(snapshot, map_cloud_resolution);
+    if (!grid) {
+      return;
+    }
+
+    grid->header.frame_id = map_frame_id;
+    grid->header.stamp = snapshot.back()->scan->header.stamp;
+
+    occ_grid_pub.publish(grid);
   }
 
   /**
@@ -899,6 +913,7 @@ private:
 
   std::unique_ptr<message_filters::Subscriber<nav_msgs::Odometry>> odom_sub;
   std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> cloud_sub;
+  std::unique_ptr<message_filters::Subscriber<sensor_msgs::LaserScan>> scan_sub;
   std::unique_ptr<message_filters::Synchronizer<ApproxSyncPolicy>> sync;
 
   ros::Subscriber gps_sub;
@@ -920,6 +935,7 @@ private:
   std::string points_topic;
   ros::Publisher read_until_pub;
   ros::Publisher map_points_pub;
+  ros::Publisher occ_grid_pub;
 
   tf::TransformListener tf_listener;
 
@@ -959,6 +975,7 @@ private:
   std::mutex keyframes_snapshot_mutex;
   std::vector<KeyFrameSnapshot::Ptr> keyframes_snapshot;
   std::unique_ptr<MapCloudGenerator> map_cloud_generator;
+  std::unique_ptr<MapGridGenerator> map_grid_generator;
 
   // graph slam
   // all the below members must be accessed after locking main_thread_mutex

@@ -3,14 +3,8 @@ cmake_minimum_required(VERSION 2.8.3)
 project(hdl_graph_slam)
 
 # Can we use C++17 in indigo?
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  add_definitions(-std=c++11)
-  set(CMAKE_CXX_FLAGS "-std=c++11")
-else()
-  add_definitions(-std=c++14 -msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2)
-  set(CMAKE_CXX_FLAGS "-std=c++14 -msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2")
-endif()
-
+add_definitions(-msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2)
+set(CMAKE_CXX_FLAGS "-msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 # pcl 1.7 causes a segfault when it is built with debug mode
@@ -135,6 +129,7 @@ add_library(hdl_graph_slam_nodelet
   src/hdl_graph_slam/registrations.cpp
   src/hdl_graph_slam/information_matrix_calculator.cpp
   src/g2o/robust_kernel_io.cpp
+  src/hdl_graph_slam/map_grid_generator.cpp
 )
 target_link_libraries(hdl_graph_slam_nodelet
   ${catkin_LIBRARIES}
