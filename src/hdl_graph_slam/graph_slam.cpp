@@ -26,6 +26,7 @@
 #include <g2o/robust_kernel_io.hpp>
 
 #include <sstream>
+#include <ros/ros.h>
 
 G2O_USE_OPTIMIZATION_LIBRARY(pcg)
 G2O_USE_OPTIMIZATION_LIBRARY(cholmod)  // be aware of that cholmod brings GPL dependency
@@ -302,10 +303,6 @@ int GraphSLAM::optimize(int num_iterations) {
   ss << std::endl;
   ss << "--- pose graph optimization ---" << "\r\n";
   ss << "nodes: " << graph->vertices().size() << "   edges: " << graph->edges().size() << "\r\n";
-  ss << "optimizing... ";
-  std::cout << ss.rdbuf() << std::flush;
-
-  ss.str("");
 
   graph->initializeOptimization();
   graph->setVerbose(false);
@@ -316,11 +313,10 @@ int GraphSLAM::optimize(int num_iterations) {
   int iterations = graph->optimize(num_iterations);
 
   auto t2 = ros::WallTime::now();
-  ss << "done" << std::endl;
   ss << "iterations: " << iterations << "/" << num_iterations <<  " | ";
   ss << "chi2: (before)" << chi2 << " -> (after)" << graph->chi2() << "\r\n";
   ss << "time: " << boost::format("%.3f") % (t2 - t1).toSec() << "[sec]" << "\r\n";
-  std::cout << ss.rdbuf();
+  ROS_INFO_STREAM_THROTTLE(10, ss.rdbuf());
 
   return iterations;
 }

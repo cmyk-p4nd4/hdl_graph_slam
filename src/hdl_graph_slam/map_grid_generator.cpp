@@ -3,8 +3,14 @@
 #include <hdl_graph_slam/map_grid_generator.hpp>
 #include <limits>
 #include <algorithm>
+#include <sstream>
+#include <ros/ros.h>
+
+#include <boost/format.hpp>
 
 #include <geometry_msgs/TransformStamped.h>
+#include <pcl/filters/passthrough.h>
+#include <pcl_ros/transforms.h>
 
 namespace hdl_graph_slam {
 
@@ -17,56 +23,110 @@ nav_msgs::OccupancyGrid::Ptr MapGridGenerator::generate(const std::vector<KeyFra
     std::cerr << "Keyframe is empty!" << std::endl;
     return nullptr;
   }
+  if (keyframes.front()->scan == nullptr) {
+    return nullptr;
+  }
 
-  float minX = std::numeric_limits<float>::infinity();
-  float maxX = -minX;
-  float minY = std::numeric_limits<float>::infinity();
-  float maxY = -minY;
+  if (resolution <= 0.05) {
+    resolution = 0.05;
+  }
+
+  tf::StampedTransform sensorToWorldTf;
+  try {
+    tf_listener.lookupTransform("map", keyframes.back()->cloud->header.frame_id, ros::Time(0), sensorToWorldTf);
+  } catch (tf::LookupException& ex) {
+    ROS_ERROR("%s", ex.what());
+    return nullptr;
+  }
+  Eigen::Matrix4f sensorToWorld;
+  pcl_ros::transformAsMatrix(sensorToWorldTf, sensorToWorld);
+
+
+  double minX = std::numeric_limits<double>::infinity();
+  double maxX = -minX;
+  double minY = std::numeric_limits<double>::infinity();
+  double maxY = -minY;
+  double minZ, maxZ;
+
+  pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
+  cloud->reserve(keyframes.front()->cloud->size() * keyframes.size());
 
   for(const auto& keyframe : keyframes) {
-    auto pose = keyframe->pose.matrix().cast<float>();
-    for(auto& points : *keyframe->cloud) {
-      KeyFrameSnapshot::PointT dst_pt;
-      dst_pt.getVector4fMap() = pose * points.getVector4fMap();
-
-      // get minmax 
-      minX = std::min(minX, dst_pt.x);
-      maxX = std::min(maxX, dst_pt.x);
-
-      minY = std::min(minY, dst_pt.y);
-      maxY = std::min(maxY, dst_pt.y);
+    Eigen::Matrix4f pose = keyframe->pose.matrix().cast<float>();
+    for(const auto& src_pt : keyframe->cloud->points) {
+      PointT dst_pt;
+      dst_pt.getVector4fMap() = pose * src_pt.getVector4fMap();
+      dst_pt.intensity = src_pt.intensity;
+      cloud->push_back(dst_pt);
     }
   }
-  // after loop [min|max]X and [min|maxY] should have the absolute [min|max] value for the world frame
 
-  uint32_t cellSizeX = static_cast<uint32_t>((maxX - minX) / resolution);
-  uint32_t cellSizeY = static_cast<uint32_t>((maxY - minY) / resolution);
+  pcl::PassThrough<PointT> crop;
+  crop.setInputCloud(cloud);
+  crop.setFilterFieldName("z");
+  crop.setFilterLimits(-0.5, 1.2);
+
+  pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());  
+  crop.filter(*filtered);
+
+
+  minX = std::min_element(filtered->begin(), filtered->end(), [](PointT a, PointT b) {return a.x < b.x;})->x;
+  maxX = std::max_element(filtered->begin(), filtered->end(), [](PointT a, PointT b) {return a.x < b.x;})->x;
+
+  minY = std::min_element(filtered->begin(), filtered->end(), [](PointT a, PointT b) {return a.y < b.y;})->y;
+  maxY = std::max_element(filtered->begin(), filtered->end(), [](PointT a, PointT b) {return a.y < b.y;})->y;
+
+  // [min|max]X and [min|maxY] should have the absolute [min|max] value for the world frame
+
+
+  /*
+    (0, 0)
+    +------------> X (column)                   
+    |
+    |
+    |
+    |
+    V             x(cellSizeX - 1, cellSizeY - 1)
+    Y (Row)
+  */
+
+  uint32_t gridWidth = static_cast<uint32_t>(std::fabs(maxX - minX) / resolution) + 1; // column
+  uint32_t gridHeight = static_cast<uint32_t>(std::fabs(maxY - minY) / resolution) + 1; // Row
+  // uint32_t cellSizeX = static_cast<uint32_t>(std::fabs(maxX - minX) );
+  // uint32_t cellSizeY = static_cast<uint32_t>(std::fabs(maxY - minY) );
   nav_msgs::MapMetaData meta;
   meta.resolution = resolution;
-  meta.height = cellSizeY;
-  meta.width = cellSizeX;
+  meta.height = gridHeight;
+  meta.width = gridWidth; 
   meta.origin = geometry_msgs::Pose();
+  ROS_INFO_THROTTLE_NAMED(10, "MapGridGenerator", "Map Size is: %dx%d\r\n", meta.width, meta.height);
 
-  // set map origin to bottom left of the world frame such that middle is (0,0) in world
-  meta.origin.position.x = -double(maxX - minX) / (resolution * 2.0);
-  meta.origin.position.y = -double(maxY - minY) / (resolution * 2.0);
-  meta.origin.position.z = 0.0;
-  meta.origin.orientation = geometry_msgs::Quaternion();
+  /* set map origin to bottom left of the world frame such that middle is (0,0) in world
+     
+    +---------------> X (column)                   
+    |
+    |
+    |       x (0,0)
+    |
+    |
+    V              x ((cellSizeX / 2) - 1, (cellSizeY /2) - 1)
+    Y (Row)
+  */
+  meta.origin.position.x = -0.5 * double(std::fabs(maxX + minX));
+  meta.origin.position.y = -0.5 * double(std::fabs(maxY + minY));
 
   std::vector<float> log_odd_cell;
   nav_msgs::OccupancyGridPtr map_grid(new nav_msgs::OccupancyGrid());
   map_grid->info = meta;
-  map_grid->header.frame_id = keyframes.front()->cloud->header.frame_id;
 
-  map_grid->data.resize(cellSizeY * cellSizeX);
-  log_odd_cell.resize(cellSizeY * cellSizeX);
+  map_grid->data.resize(gridHeight * gridWidth);
+  log_odd_cell.resize(gridHeight * gridWidth);
   std::fill(map_grid->data.begin(), map_grid->data.end(), static_cast<int8_t>(-1));
   std::fill(log_odd_cell.begin(), log_odd_cell.end(), 0.0f);
 
-
-  auto worldToGrid = [=](const Eigen::Vector2f & pose) {
-    int _x = std::lround(pose.x() / resolution);
-    int _y = std::lround(pose.y() / resolution);
+  auto worldToGrid = [=, &meta](const Eigen::Vector2f & pose) {
+    int _x = std::lround((pose.x() - meta.origin.position.x) / resolution);
+    int _y = std::lround((pose.y() - meta.origin.position.y) / resolution);
     return Eigen::Vector2i(_x, _y);
   };
 
@@ -94,12 +154,17 @@ nav_msgs::OccupancyGrid::Ptr MapGridGenerator::generate(const std::vector<KeyFra
 
       std::vector<Eigen::Vector2i> cells = bresenham_line(robot_pose_grid, laser_world_grid);
 
+      // std::stringstream ss;
+
       // iterate all cells
       for (const auto &cell : cells) {
         float _log = inverse_sensor_model(cell, laser_world_grid, resolution);
         // log odd update
-        log_odd_cell.at(cell.x() * meta.width + cell.y()) += _log;
+        // log_odd_cell.at(cell.x() + map_grid->info.width * cell.y()) += _log;
+        // ss << boost::format("(%d, %d) ") % cell.x() % cell.y();
       }
+      // ss << std::endl;
+      // ROS_INFO_STREAM_COND(i % 600 == 0, ss.rdbuf());
     }
   }
 

@@ -26,7 +26,7 @@ public:
   using PointT = pcl::PointXYZI;
   using Ptr = std::shared_ptr<KeyFrame>;
 
-  KeyFrame(const ros::Time& stamp, const Eigen::Isometry3d& odom, double accum_distance, const pcl::PointCloud<PointT>::ConstPtr& cloud, const sensor_msgs::LaserScanConstPtr& scan);
+  KeyFrame(const ros::Time& stamp, const Eigen::Isometry3d& odom, double accum_distance, const pcl::PointCloud<PointT>::ConstPtr& cloud, const sensor_msgs::LaserScanConstPtr& scan = nullptr);
   KeyFrame(const std::string& directory, g2o::HyperGraph* graph);
   virtual ~KeyFrame();
 

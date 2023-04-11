@@ -17,6 +17,8 @@ namespace hdl_graph_slam {
 
 class MapGridGenerator {
 public:
+  using PointT = pcl::PointXYZI;
+
   MapGridGenerator();
   ~MapGridGenerator();
 

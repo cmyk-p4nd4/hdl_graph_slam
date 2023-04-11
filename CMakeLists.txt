@@ -59,6 +59,7 @@ endif()
 add_message_files(FILES
   FloorCoeffs.msg
   ScanMatchingStatus.msg
+  PointCloudByte.msg
 )
 
 add_service_files(FILES

@@ -2,16 +2,17 @@
 # SPDX-License-Identifier: BSD-2-Clause
 import tf
 import rospy
-from geometry_msgs.msg import *
+from geometry_msgs.msg import TransformStamped
 
 
 class Map2OdomPublisher:
 	def __init__(self):
 		self.broadcaster = tf.TransformBroadcaster()
 		self.subscriber = rospy.Subscriber('/hdl_graph_slam/odom2pub', TransformStamped, self.callback)
+		
 
-	def callback(self, odom_msg):
-		self.odom_msg = odom_msg
+	def callback(self, odom_msg:TransformStamped):
+		self.odom_msg: TransformStamped = odom_msg
 
 	def spin(self):
 		if not hasattr(self, 'odom_msg'):
@@ -30,12 +31,16 @@ class Map2OdomPublisher:
 
 def main():
 	rospy.init_node('map2odom_publisher')
+	freq = rospy.get_param("~publish_rate", 30.0)
 	node = Map2OdomPublisher()
 
-	rate = rospy.Rate(10.0)
+	rate = rospy.Rate(freq)
 	while not rospy.is_shutdown():
 		node.spin()
-		rate.sleep()
+		try:
+			rate.sleep()
+		except rospy.exceptions.ROSInterruptException:
+			pass
 
 if __name__ == '__main__':
 	main()
