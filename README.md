@@ -1,5 +1,5 @@
 # Disclaimer
-### **This repository is a forked modification of the original library indented for specific use. Do not report issues here!**
+### **This repository is a forked modification of the original library intended for specific use. Do not report issues here!**
 
 Forked from [koide3/hdl_graph_slam](https://github.com/koide3/hdl_graph_slam)
 ----
