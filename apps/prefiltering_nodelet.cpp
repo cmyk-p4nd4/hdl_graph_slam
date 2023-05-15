@@ -10,6 +10,7 @@
 
 #include <sensor_msgs/Imu.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <std_msgs/Float64.h>
 
 #include <nodelet/nodelet.h>
 #include <pluginlib/class_list_macros.h>
@@ -44,6 +45,7 @@ public:
     points_sub = nh.subscribe("/velodyne_points", 64, &PrefilteringNodelet::cloud_callback, this);
     points_pub = nh.advertise<sensor_msgs::PointCloud2>("/filtered_points", 32);
     colored_pub = nh.advertise<sensor_msgs::PointCloud2>("/colored_points", 32);
+    time_pub = nh.advertise<std_msgs::Float64>("/prefiltering/time", 128);
   }
 
 private:
@@ -109,6 +111,8 @@ private:
       return;
     }
 
+    auto t1 = ros::WallTime::now();
+
     src_cloud = deskewing(src_cloud);
 
     // if base_link_frame is defined, transform the input cloud to the frame
@@ -132,7 +136,13 @@ private:
     filtered = downsample(filtered);
     filtered = outlier_removal(filtered);
 
+    auto t2 = ros::WallTime::now();
+
     points_pub.publish(*filtered);
+
+    std_msgs::Float64 time;
+    time.data = (t2-t1).toSec() * 1000.0;
+    time_pub.publish(time);
   }
 
   pcl::PointCloud<PointT>::ConstPtr downsample(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
@@ -253,6 +263,7 @@ private:
   ros::Publisher points_pub;
 
   ros::Publisher colored_pub;
+  ros::Publisher time_pub;
 
   tf::TransformListener tf_listener;
 

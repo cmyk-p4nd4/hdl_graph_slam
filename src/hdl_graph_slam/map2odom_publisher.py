@@ -31,7 +31,7 @@ class Map2OdomPublisher:
 
 def main():
 	rospy.init_node('map2odom_publisher')
-	freq = rospy.get_param("~publish_rate", 30.0)
+	freq = rospy.get_param("~publish_rate", 25.0)
 	node = Map2OdomPublisher()
 
 	rate = rospy.Rate(freq)

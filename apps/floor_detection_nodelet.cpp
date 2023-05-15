@@ -9,7 +9,7 @@
 #include <ros/time.h>
 #include <pcl_ros/point_cloud.h>
 
-#include <std_msgs/Time.h>
+#include <std_msgs/Float64.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <hdl_graph_slam/FloorCoeffs.h>
 
@@ -47,6 +47,7 @@ public:
     read_until_pub = nh.advertise<std_msgs::Header>("/floor_detection/read_until", 32);
     floor_filtered_pub = nh.advertise<sensor_msgs::PointCloud2>("/floor_detection/floor_filtered_points", 32);
     floor_points_pub = nh.advertise<sensor_msgs::PointCloud2>("/floor_detection/floor_points", 32);
+    time_pub = nh.advertise<std_msgs::Float64>("/floor_detection/time", 128);
   }
 
 private:
@@ -77,6 +78,7 @@ private:
       return;
     }
 
+    ros::WallTime t1 = ros::WallTime::now();
     // floor detection
     boost::optional<Eigen::Vector4f> floor = detect(cloud);
 
@@ -90,6 +92,8 @@ private:
       }
     }
 
+    ros::WallTime t2 = ros::WallTime::now();
+
     floor_pub.publish(coeffs);
 
     // for offline estimation
@@ -100,6 +104,10 @@ private:
 
     read_until->frame_id = "/filtered_points";
     read_until_pub.publish(read_until);
+
+    std_msgs::Float64 time;
+    time.data = (t2-t1).toSec() * 1000.0;
+    time_pub.publish(time);
   }
 
   /**
@@ -247,6 +255,7 @@ private:
   ros::Publisher floor_pub;
   ros::Publisher floor_points_pub;
   ros::Publisher floor_filtered_pub;
+  ros::Publisher time_pub;
 
   std::string points_topic;
   ros::Publisher read_until_pub;

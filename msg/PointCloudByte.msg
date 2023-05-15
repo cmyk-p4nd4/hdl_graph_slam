@@ -1,3 +1,2 @@
-Header Header
-
-int8[] bytes
+Header header
+uint8[] bytes

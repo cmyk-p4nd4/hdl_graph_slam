@@ -12,6 +12,7 @@
 #include <tf/transform_broadcaster.h>
 
 #include <std_msgs/Time.h>
+#include <std_msgs/Float64.h>
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <geometry_msgs/TransformStamped.h>
@@ -52,10 +53,13 @@ public:
 
     points_sub = nh.subscribe("/filtered_points", 256, &ScanMatchingOdometryNodelet::cloud_callback, this);
     read_until_pub = nh.advertise<std_msgs::Header>("/scan_matching_odometry/read_until", 32);
-    odom_pub = nh.advertise<nav_msgs::Odometry>("/odom", 32);
+    odom_pub = nh.advertise<nav_msgs::Odometry>(odom_pub_topic, 32);
     trans_pub = nh.advertise<geometry_msgs::TransformStamped>("/scan_matching_odometry/transform", 32);
-    status_pub = private_nh.advertise<ScanMatchingStatus>("/scan_matching_odometry/status", 8);
+    if (publish_status) {
+      status_pub = private_nh.advertise<ScanMatchingStatus>("/scan_matching_odometry/status", 8);
+    }
     aligned_points_pub = nh.advertise<sensor_msgs::PointCloud2>("/aligned_points", 32);
+    time_pub = nh.advertise<std_msgs::Float64>("/scan_matching_odometry/time", 128);
   }
 
 private:
@@ -67,6 +71,7 @@ private:
     points_topic = pnh.param<std::string>("points_topic", "/velodyne_points");
     odom_frame_id = pnh.param<std::string>("odom_frame_id", "odom");
     robot_odom_frame_id = pnh.param<std::string>("robot_odom_frame_id", "robot_odom");
+    odom_pub_topic = pnh.param<std::string>("odom_pub_topic","/odom");
 
     // The minimum tranlational distance and rotation angle between keyframes.
     // If this value is zero, frames are always compared with the previous frame
@@ -78,6 +83,10 @@ private:
     transform_thresholding = pnh.param<bool>("transform_thresholding", false);
     max_acceptable_trans = pnh.param<double>("max_acceptable_trans", 1.0);
     max_acceptable_angle = pnh.param<double>("max_acceptable_angle", 1.0);
+
+    // Whether to publish scan matching status
+    publish_status = pnh.param<bool>("publish_status", false);
+    publish_transform = pnh.param<bool>("publish_transform", true);
 
     // select a downsample method (VOXELGRID, APPROX_VOXELGRID, NONE)
     std::string downsample_method = pnh.param<std::string>("downsample_method", "VOXELGRID");
@@ -117,8 +126,15 @@ private:
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*cloud_msg, *cloud);
 
+    auto t1 = ros::WallTime::now();
+
     Eigen::Matrix4f pose = matching(cloud_msg->header.stamp, cloud);
     publish_odometry(cloud_msg->header.stamp, cloud_msg->header.frame_id, pose);
+
+    auto t2 = ros::WallTime::now();
+    std_msgs::Float64 time;
+    time.data = (t2-t1).toSec() * 1000.0;
+    time_pub.publish(time);
 
     // In offline estimation, point clouds until the published time will be supplied
     std_msgs::HeaderPtr read_until(new std_msgs::Header());
@@ -208,7 +224,9 @@ private:
     pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
     registration->align(*aligned, prev_trans * msf_delta.matrix());
 
-    publish_scan_matching_status(stamp, cloud->header.frame_id, aligned, msf_source, msf_delta);
+    if (publish_status) {
+      publish_scan_matching_status(stamp, cloud->header.frame_id, aligned, msf_source, msf_delta);
+    }
 
     if(!registration->hasConverged()) {
       NODELET_INFO_STREAM("scan matching has not converged!!");
@@ -271,7 +289,9 @@ private:
     trans_pub.publish(odom_trans);
 
     // broadcast the transform over tf
-    odom_broadcaster.sendTransform(odom_trans);
+    if (publish_transform) {
+      odom_broadcaster.sendTransform(odom_trans);
+    }
 
     // publish the transform
     nav_msgs::Odometry odom;
@@ -346,6 +366,7 @@ private:
   ros::Publisher trans_pub;
   ros::Publisher aligned_points_pub;
   ros::Publisher status_pub;
+  ros::Publisher time_pub;
   tf::TransformListener tf_listener;
   tf::TransformBroadcaster odom_broadcaster;
   tf::TransformBroadcaster keyframe_broadcaster;
@@ -353,6 +374,7 @@ private:
   std::string points_topic;
   std::string odom_frame_id;
   std::string robot_odom_frame_id;
+  std::string odom_pub_topic;
   ros::Publisher read_until_pub;
 
   // keyframe parameters
@@ -364,6 +386,9 @@ private:
   bool transform_thresholding;  //
   double max_acceptable_trans;  //
   double max_acceptable_angle;
+
+  bool publish_status;
+  bool publish_transform;
 
   // odometry calculation
   geometry_msgs::PoseWithCovarianceStampedConstPtr msf_pose;

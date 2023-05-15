@@ -25,6 +25,7 @@
 #include <tf/transform_listener.h>
 
 #include <std_msgs/Time.h>
+#include <std_msgs/Float64.h>
 #include <nav_msgs/Odometry.h>
 #include <nmea_msgs/Sentence.h>
 #include <sensor_msgs/Imu.h>
@@ -110,9 +111,10 @@ public:
     imu_acceleration_edge_stddev = private_nh.param<double>("imu_acceleration_edge_stddev", 3.0);
 
     points_topic = private_nh.param<std::string>("points_topic", "/velodyne_points");
+    odom_topic = private_nh.param<std::string>("odom_topic", "/odom");
 
     // subscribers
-    odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, "/odom", 256));
+    odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, odom_topic, 256));
     cloud_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(mt_nh, "/filtered_points", 32));
     sync.reset(new message_filters::Synchronizer<ApproxSyncPolicy>(ApproxSyncPolicy(32), *odom_sub, *cloud_sub));
     sync->registerCallback(boost::bind(&HdlGraphSlamNodelet::cloud_callback, this, _1, _2));
@@ -131,6 +133,7 @@ public:
     map_points_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/hdl_graph_slam/map_points", 1, true);
     read_until_pub = mt_nh.advertise<std_msgs::Header>("/hdl_graph_slam/read_until", 32);
     compress_byte_pub = mt_nh.advertise<hdl_graph_slam::PointCloudByte>("/compressed_cloud_bytes", 10, true);
+    time_pub = mt_nh.advertise<std_msgs::Float64>("/hdl_graph_slam/time", 128);
 
     dump_service_server = mt_nh.advertiseService("/hdl_graph_slam/dump", &HdlGraphSlamNodelet::dump_service, this);
     save_map_service_server = mt_nh.advertiseService("/hdl_graph_slam/save_map", &HdlGraphSlamNodelet::save_map_service, this);
@@ -542,13 +545,13 @@ private:
     pcl::copyPointCloud<pcl::PointXYZI, pcl::PointXYZ>(*cloud, *cc);
 
     std::stringstream octant;
-    pcl::io::OctreePointCloudCompression<pcl::PointXYZ> octreecomp(pcl::io::MANUAL_CONFIGURATION, false, map_cloud_resolution, map_cloud_resolution, false, 10, false, 1);
+    pcl::io::OctreePointCloudCompression<pcl::PointXYZ> octreecomp(pcl::io::LOW_RES_OFFLINE_COMPRESSION_WITHOUT_COLOR);
     octreecomp.encodePointCloud(cc, octant);
 
     hdl_graph_slam::PointCloudByte::Ptr byte_msg(new hdl_graph_slam::PointCloudByte);
-    byte_msg->Header.frame_id = map_frame_id;
-    byte_msg->Header.stamp = ros::Time().fromNSec(snapshot.back()->cloud->header.stamp);
-    std::copy(std::istream_iterator<int8_t>(octant), std::istream_iterator<int8_t>(), std::back_inserter(byte_msg->bytes));
+    byte_msg->header.frame_id = map_frame_id;
+    byte_msg->header.stamp = ros::Time().fromNSec(snapshot.back()->cloud->header.stamp);
+    std::copy(std::istream_iterator<char>(octant), std::istream_iterator<char>(), std::back_inserter(byte_msg->bytes));
 
     compress_byte_pub.publish(byte_msg); 
   }
@@ -558,6 +561,8 @@ private:
    * @param event
    */
   void optimization_timer_callback(const ros::WallTimerEvent& event) {
+    auto t1 = ros::WallTime::now();
+
     std::lock_guard<std::mutex> lock(main_thread_mutex);
 
     // add keyframes and floor coeffs in the queues to the pose graph
@@ -573,6 +578,10 @@ private:
     }
 
     if(!keyframe_updated & !flush_floor_queue() & !flush_gps_queue() & !flush_imu_queue()) {
+      auto t2 = ros::WallTime::now();
+      std_msgs::Float64 time;
+      time.data = (t2-t1).toSec() * 1000.0;
+      time_pub.publish(time);
       return;
     }
 
@@ -624,6 +633,11 @@ private:
       auto markers = create_marker_array(ros::Time::now());
       markers_pub.publish(markers);
     }
+
+    auto t2 = ros::WallTime::now();
+    std_msgs::Float64 time;
+    time.data = (t2 - t1).toSec() * 1000.0;
+    time_pub.publish(time);
 
     saveKeyframeOdometry("slam_trajectory.txt");
   }
@@ -952,9 +966,11 @@ private:
   ros::Publisher odom2map_pub;
 
   std::string points_topic;
+  std::string odom_topic;
   ros::Publisher read_until_pub;
   ros::Publisher map_points_pub;
   ros::Publisher compress_byte_pub;
+  ros::Publisher time_pub;
 
   tf::TransformListener tf_listener;
 
